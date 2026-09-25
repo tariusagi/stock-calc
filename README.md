@@ -75,6 +75,10 @@ Both executables are written to `target/release/`. Keep `portfolio.exe` and
 `stockcalc.exe` in the same folder so each can launch the other. The app icon
 (`stock_calc.ico`) is embedded at build time.
 
+The Visual C++ runtime is linked statically (see `.cargo/config.toml`), so the
+two executables run on Windows 10/11 as-is: no installer and no VC++
+Redistributable needed. Just copy them anywhere and run.
+
 Run the unit tests with:
 
 ```bash
