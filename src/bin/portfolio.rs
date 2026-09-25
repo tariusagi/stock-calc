@@ -16,13 +16,14 @@ fn main() -> eframe::Result {
         instance::hand_over(App::Portfolio);
         return Ok(());
     }
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(App::Portfolio.title())
-            .with_inner_size([1400.0, 740.0])
-            .with_min_inner_size([900.0, 480.0]),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(App::Portfolio.title())
+        .with_inner_size([1400.0, 740.0])
+        .with_min_inner_size([900.0, 480.0]);
+    if let Some(icon) = app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("Stock Portfolio", options, Box::new(|cc| Ok(Box::new(PortfolioApp::new(cc)))))
 }
 

@@ -21,14 +21,15 @@ fn main() -> eframe::Result {
         instance::hand_over(App::Calculator);
         return Ok(());
     }
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(App::Calculator.title())
-            .with_inner_size([CALC_WIDTH, HEIGHT])
-            .with_resizable(false)
-            .with_maximize_button(false),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(App::Calculator.title())
+        .with_inner_size([CALC_WIDTH, HEIGHT])
+        .with_resizable(false)
+        .with_maximize_button(false);
+    if let Some(icon) = app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("Stock Calculator", options, Box::new(|cc| Ok(Box::new(CalcApp::new(cc)))))
 }
 

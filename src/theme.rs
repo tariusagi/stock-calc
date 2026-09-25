@@ -34,6 +34,26 @@ pub fn signed_color(v: f64) -> Color32 {
     }
 }
 
+/// The window/taskbar icon: the largest image in `stock_calc.ico`.
+pub fn app_icon() -> Option<std::sync::Arc<egui::IconData>> {
+    const ICO: &[u8] = include_bytes!("../stock_calc.ico");
+    // ICO layout: 6-byte header, then 16-byte directory entries of
+    // (width, height, .., .., size: u32 @8, offset: u32 @12); 0 means 256 px.
+    let count = u16::from_le_bytes(ICO.get(4..6)?.try_into().ok()?) as usize;
+    let (offset, size) = (0..count)
+        .filter_map(|i| {
+            let e = ICO.get(6 + 16 * i..22 + 16 * i)?;
+            let px = if e[0] == 0 { 256 } else { e[0] as u32 };
+            let size = u32::from_le_bytes(e[8..12].try_into().ok()?) as usize;
+            let offset = u32::from_le_bytes(e[12..16].try_into().ok()?) as usize;
+            Some((px, offset, size))
+        })
+        .max_by_key(|&(px, ..)| px)
+        .map(|(_, offset, size)| (offset, size))?;
+    let png = ICO.get(offset..offset + size)?;
+    eframe::icon_data::from_png_bytes(png).ok().map(std::sync::Arc::new)
+}
+
 /// Applies fonts and style; call once at app creation.
 pub fn setup(ctx: &egui::Context) {
     setup_fonts(ctx);
