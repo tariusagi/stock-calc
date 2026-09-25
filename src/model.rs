@@ -65,7 +65,7 @@ impl Holding {
     }
 }
 
-/// Saved inputs of the stock calculator (`stockcalc.json`).
+/// Saved state of the stock calculator (`stockcalc.json`).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct CalculatorData {
@@ -73,6 +73,89 @@ pub struct CalculatorData {
     pub entry: f64,
     pub stop_loss: f64,
     pub risk_amount: f64,
+    /// One entry per symbol, most recently modified first.
+    pub history: Vec<HistoryEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct HistoryEntry {
+    pub symbol: String,
+    pub entry: f64,
+    pub stop_loss: f64,
+    pub risk_amount: f64,
+    /// Last modification, in seconds since the Unix epoch.
+    pub modified: u64,
+}
+
+impl HistoryEntry {
+    pub fn sizing(&self) -> Result<Sizing, &'static str> {
+        Sizing::compute(self.entry, self.stop_loss, self.risk_amount)
+    }
+}
+
+impl CalculatorData {
+    /// Records the current inputs under their symbol, updating the existing
+    /// entry (and its timestamp) only if something changed.
+    pub fn record_history(&mut self) {
+        if self.symbol.is_empty() {
+            return;
+        }
+        let fresh = HistoryEntry {
+            symbol: self.symbol.clone(),
+            entry: self.entry,
+            stop_loss: self.stop_loss,
+            risk_amount: self.risk_amount,
+            modified: now_secs(),
+        };
+        if let Some(i) = self.history.iter().position(|e| e.symbol == fresh.symbol) {
+            let e = &self.history[i];
+            if (e.entry, e.stop_loss, e.risk_amount) == (fresh.entry, fresh.stop_loss, fresh.risk_amount) {
+                return;
+            }
+            self.history.remove(i);
+        }
+        // Newest first; inserting at the front keeps that order even when
+        // timestamps tie within the same second.
+        self.history.insert(0, fresh);
+    }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Position sizing: how many shares to buy so a stop-out loses at most
+/// the risk amount.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sizing {
+    pub quantity: f64,
+    pub risk_per_share: f64,
+    /// Stop distance from entry in percent (negative).
+    pub stop_pct: f64,
+    pub position_size: f64,
+    pub actual_risk: f64,
+}
+
+impl Sizing {
+    pub fn compute(entry: f64, stop: f64, risk: f64) -> Result<Self, &'static str> {
+        if entry <= 0.0 || risk <= 0.0 || stop <= 0.0 {
+            return Err("Fill in entry, stop loss and risk amount.");
+        }
+        if stop >= entry {
+            return Err("Stop loss must be below the entry price.");
+        }
+        let per_share = entry - stop;
+        // Round down: buying more would risk more than the given amount.
+        let quantity = (risk / per_share).floor();
+        Ok(Self {
+            quantity,
+            risk_per_share: per_share,
+            stop_pct: -per_share / entry * 100.0,
+            position_size: quantity * entry,
+            actual_risk: quantity * per_share,
+        })
+    }
 }
 
 /// The portfolio (`portfolio.json`).
@@ -160,4 +243,42 @@ fn save_json<T: Serialize>(path: &Path, data: &T) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, json)?;
     fs::rename(&tmp, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizing_rounds_quantity_down() {
+        let s = Sizing::compute(245.0, 230.0, 2_500_000.0).unwrap();
+        assert_eq!(s.quantity, 166_666.0);
+        assert_eq!(s.risk_per_share, 15.0);
+        assert!(s.actual_risk <= 2_500_000.0);
+        assert!(Sizing::compute(230.0, 245.0, 1000.0).is_err());
+        assert!(Sizing::compute(0.0, 0.0, 1000.0).is_err());
+    }
+
+    #[test]
+    fn history_keeps_one_entry_per_symbol_newest_first() {
+        let mut d = CalculatorData { symbol: "AAA".into(), entry: 10.0, stop_loss: 9.0, risk_amount: 100.0, ..Default::default() };
+        d.record_history();
+        d.history[0].modified = 1; // pretend it is old
+        d.symbol = "BBB".into();
+        d.record_history();
+        assert_eq!(d.history.len(), 2);
+        assert_eq!(d.history[0].symbol, "BBB");
+
+        // Unchanged inputs don't touch the timestamp.
+        d.symbol = "AAA".into();
+        d.record_history();
+        assert_eq!(d.history[1].symbol, "AAA");
+        assert_eq!(d.history[1].modified, 1);
+
+        // Changed inputs update the existing entry and move it to the top.
+        d.entry = 11.0;
+        d.record_history();
+        assert_eq!(d.history.len(), 2);
+        assert_eq!((d.history[0].symbol.as_str(), d.history[0].entry), ("AAA", 11.0));
+    }
 }

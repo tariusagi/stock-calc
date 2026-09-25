@@ -6,14 +6,19 @@ use std::time::{Duration, SystemTime};
 
 use eframe::egui::{self, Align, Button, Color32, Layout, Margin, RichText, Stroke, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
-use stock_calc::format::{fmt_input, fmt_money, fmt_num, fmt_signed_pct, num_input, parse_or_zero, symbol_input};
+use stock_calc::format::{fmt_input, fmt_int, fmt_signed_pct, num_input, parse_or_zero, symbol_input};
+use stock_calc::instance::{self, App};
 use stock_calc::model::{self, Holding, PortfolioFile};
 use stock_calc::theme::*;
 
 fn main() -> eframe::Result {
+    if !instance::claim(App::Portfolio) {
+        instance::hand_over(App::Portfolio);
+        return Ok(());
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Stock Portfolio")
+            .with_title(App::Portfolio.title())
             .with_inner_size([1400.0, 740.0])
             .with_min_inner_size([900.0, 480.0]),
         ..Default::default()
@@ -123,16 +128,8 @@ impl PortfolioApp {
     }
 
     fn open_calculator(&mut self) {
-        let exe = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("stockcalc.exe")))
-            .filter(|p| p.exists());
-        let result = match exe {
-            Some(exe) => std::process::Command::new(&exe).spawn().map(|_| ()).map_err(|e| e.to_string()),
-            None => Err("stockcalc.exe was not found next to portfolio.exe".to_owned()),
-        };
-        if let Err(e) = result {
-            self.status = Status::Error(format!("Could not start the Stock Calculator: {e}"));
+        if let Err(e) = instance::open(App::Calculator) {
+            self.status = Status::Error(e);
         }
     }
 }
@@ -309,43 +306,43 @@ impl PortfolioApp {
                                     });
                                 });
                                 r.col(|ui| {
-                                    num_input(ui, &mut row.quantity, IN_W - 8.0, false, "0");
+                                    num_input(ui, &mut row.quantity, IN_W - 8.0, "0");
                                 });
                                 r.col(|ui| {
-                                    num_input(ui, &mut row.cost_price, IN_W - 8.0, true, "0.00");
+                                    num_input(ui, &mut row.cost_price, IN_W - 8.0, "0");
                                 });
                                 r.col(|ui| {
-                                    num_input(ui, &mut row.current_price, IN_W - 8.0, true, "0.00");
+                                    num_input(ui, &mut row.current_price, IN_W - 8.0, "0");
                                 });
                                 r.col(|ui| {
-                                    ui.label(RichText::new(fmt_money(h.total_cost())).color(TEXT));
+                                    ui.label(RichText::new(fmt_int(h.total_cost())).color(TEXT));
                                 });
                                 r.col(|ui| {
                                     let pl = h.unrealized();
-                                    let resp = ui.label(RichText::new(fmt_money(pl)).color(signed_color(pl)));
+                                    let resp = ui.label(RichText::new(fmt_int(pl)).color(signed_color(pl)));
                                     if h.total_cost() > 0.0 && h.current_price > 0.0 {
                                         resp.on_hover_text(format!(
                                             "Market value {}\n{}",
-                                            fmt_money(h.market_value()),
+                                            fmt_int(h.market_value()),
                                             fmt_signed_pct(pl / h.total_cost() * 100.0)
                                         ));
                                     }
                                 });
                                 r.col(|ui| {
-                                    num_input(ui, &mut row.stop_loss, IN_W - 8.0, true, "0.00");
+                                    num_input(ui, &mut row.stop_loss, IN_W - 8.0, "0");
                                 });
                                 r.col(|ui| pct_pill(ui, h.stop_pct()));
                                 r.col(|ui| {
                                     let v = h.total_loss();
-                                    ui.label(RichText::new(fmt_money(v)).color(signed_color(v)));
+                                    ui.label(RichText::new(fmt_int(v)).color(signed_color(v)));
                                 });
                                 r.col(|ui| {
-                                    num_input(ui, &mut row.target, IN_W - 8.0, true, "0.00");
+                                    num_input(ui, &mut row.target, IN_W - 8.0, "0");
                                 });
                                 r.col(|ui| pct_pill(ui, h.target_pct()));
                                 r.col(|ui| {
                                     let v = h.total_gain();
-                                    ui.label(RichText::new(fmt_money(v)).color(signed_color(v)));
+                                    ui.label(RichText::new(fmt_int(v)).color(signed_color(v)));
                                 });
                                 r.col(|ui| {
                                     let btn = Button::new(RichText::new("✖").color(MUTED).size(13.0)).frame(false);
@@ -360,7 +357,7 @@ impl PortfolioApp {
                         let sum = |f: fn(&Holding) -> f64| holdings.iter().map(f).sum::<f64>();
                         body.row(40.0, |mut r| {
                             let strong = |v: f64, color: Color32| {
-                                RichText::new(fmt_money(v)).font(semibold(15.0)).color(color)
+                                RichText::new(fmt_int(v)).font(semibold(15.0)).color(color)
                             };
                             r.col(|ui| {
                                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -474,17 +471,17 @@ fn summary_cards(ui: &mut Ui, holdings: &[Holding]) {
 
     let pl_sub = if cost > 0.0 { fmt_signed_pct(pl / cost * 100.0) } else { String::new() };
     let rr_sub = if loss < 0.0 && gain > 0.0 {
-        format!("Reward : risk  {} : 1", fmt_num(gain / -loss, 2))
+        format!("Reward : risk  {} : 1", fmt_int(gain / -loss))
     } else {
         String::new()
     };
 
     let cards: [(&str, &str, String, Color32, String); 5] = [
-        ("💼", "Total cost", fmt_money(cost), TEXT, String::new()),
-        ("🏦", "Market value", fmt_money(value), TEXT, String::new()),
-        ("📊", "Unrealized P/L", fmt_money(pl), signed_color(pl), pl_sub),
-        ("🛡", "Loss at stops", fmt_money(loss), signed_color(loss), String::new()),
-        ("🎯", "Gain at targets", fmt_money(gain), signed_color(gain), rr_sub),
+        ("💼", "Total cost", fmt_int(cost), TEXT, String::new()),
+        ("🏦", "Market value", fmt_int(value), TEXT, String::new()),
+        ("📊", "Unrealized P/L", fmt_int(pl), signed_color(pl), pl_sub),
+        ("🛡", "Loss at stops", fmt_int(loss), signed_color(loss), String::new()),
+        ("🎯", "Gain at targets", fmt_int(gain), signed_color(gain), rr_sub),
     ];
 
     let gap = 14.0;
