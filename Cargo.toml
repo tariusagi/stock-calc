@@ -1,0 +1,12 @@
+[package]
+name = "stock-calc"
+version = "0.1.0"
+edition = "2024"
+default-run = "portfolio"
+
+[dependencies]
+dirs = "7.0.0"
+eframe = "0.36"
+egui_extras = "0.36"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
