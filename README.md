@@ -22,6 +22,18 @@ It ships as two programs that work together:
   gain at targets and the overall reward : risk ratio.
 - **Stock Calculator** opens the calculator (or brings it to the front).
 
+## Live prices
+
+The portfolio keeps the current-price column up to date for Vietnamese stocks
+(HOSE, HNX, UPCOM) using [Yahoo Finance](https://finance.yahoo.com/) — a free
+source that needs no API key. On start up, and every 10 seconds after that
+until the window is closed, the app fetches the last traded price of every
+symbol in the table (sent to Yahoo with a `.VN` suffix) on a background
+thread, updates the column and saves the result. Stocks that Yahoo doesn't
+know keep their last saved price; network failures are silent and never
+overwrite anything. The status bar shows when prices were last updated —
+Yahoo's quotes for Vietnamese markets are delayed by about 15–20 minutes.
+
 ## Stock Calculator
 
 <img src="docs/calculator.png" alt="Stock Calculator with history" width="560">
@@ -93,6 +105,7 @@ src/
   lib.rs
   format.rs           ' separator formatting and the live-formatting input
   model.rs            data types, position sizing, history, persistence
+  quotes.rs           live prices for Vietnamese stocks from Yahoo Finance
   theme.rs            colors, fonts, shared widgets, app icon
   instance.rs         single instance + switching between the two apps
   bin/portfolio.rs    portfolio.exe

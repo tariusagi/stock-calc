@@ -3,4 +3,5 @@
 pub mod format;
 pub mod instance;
 pub mod model;
+pub mod quotes;
 pub mod theme;

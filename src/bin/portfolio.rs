@@ -2,14 +2,22 @@
 
 #![windows_subsystem = "windows"] // no console window on Windows
 
-use std::time::{Duration, SystemTime};
+use std::{
+    sync::mpsc,
+    time::{Duration, Instant, SystemTime},
+};
 
+use chrono::{DateTime, Local};
 use eframe::egui::{self, Align, Button, Color32, Layout, Margin, RichText, Stroke, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
 use stock_calc::format::{fmt_input, fmt_int, fmt_signed_pct, num_input, parse_or_zero, symbol_input};
 use stock_calc::instance::{self, App};
 use stock_calc::model::{self, Holding, PortfolioFile};
+use stock_calc::quotes::{self, Quote};
 use stock_calc::theme::*;
+
+/// How often the current-price column is refreshed from Yahoo Finance.
+const QUOTE_INTERVAL: Duration = Duration::from_secs(10);
 
 fn main() -> eframe::Result {
     if !instance::claim(App::Portfolio) {
@@ -79,11 +87,22 @@ struct PortfolioApp {
     confirm_delete: Option<usize>,
     /// Row whose symbol field should grab keyboard focus next frame.
     focus_row: Option<usize>,
+    /// Live prices from Yahoo Finance: a background thread fetches the whole
+    /// portfolio and sends the quotes over this channel.
+    quotes_tx: mpsc::Sender<Vec<Quote>>,
+    quotes_rx: mpsc::Receiver<Vec<Quote>>,
+    /// Next moment a refresh should start (start-up + every 10 s).
+    next_quote_fetch: Instant,
+    /// A fetch thread is out; a new one starts once it has reported back.
+    quote_fetch_running: bool,
+    /// When a price refresh last delivered quotes, shown in the status bar.
+    last_quote_update: Option<DateTime<Local>>,
 }
 
 impl PortfolioApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup(&cc.egui_ctx);
+        let (quotes_tx, quotes_rx) = mpsc::channel();
         let mut app = Self {
             rows: Vec::new(),
             last_saved: PortfolioFile::default(),
@@ -91,6 +110,12 @@ impl PortfolioApp {
             status: Status::Saved,
             confirm_delete: None,
             focus_row: None,
+            quotes_tx,
+            quotes_rx,
+            // The first frame starts the initial fetch.
+            next_quote_fetch: Instant::now(),
+            quote_fetch_running: false,
+            last_quote_update: None,
         };
         app.reload();
         app
@@ -133,6 +158,55 @@ impl PortfolioApp {
             self.status = Status::Error(e);
         }
     }
+
+    /// Starts a background thread that fetches the current price of every
+    /// stock in the table from Yahoo Finance and reports back on the channel.
+    fn spawn_quote_fetch(&mut self, ctx: egui::Context) {
+        let mut symbols: Vec<String> = self
+            .rows
+            .iter()
+            .map(|r| r.symbol.clone())
+            .filter(|s| !s.is_empty())
+            .collect();
+        symbols.sort();
+        symbols.dedup();
+        if symbols.is_empty() {
+            return;
+        }
+        self.quote_fetch_running = true;
+        let tx = self.quotes_tx.clone();
+        std::thread::spawn(move || {
+            let quotes = quotes::fetch_prices(&symbols);
+            // Fails only when the app has already closed.
+            let _ = tx.send(quotes);
+            ctx.request_repaint();
+        });
+    }
+
+    /// Applies fetched live prices to the current-price column and saves the
+    /// update to disk. Symbols the source doesn't know keep their saved price.
+    fn apply_prices(&mut self, quotes: Vec<Quote>) {
+        // An empty batch means every fetch failed; keep the old timestamp so
+        // the status bar keeps showing the last time prices were real.
+        if !quotes.is_empty() {
+            self.last_quote_update = Some(Local::now());
+        }
+        let mut updated = false;
+        for q in quotes {
+            for row in &mut self.rows {
+                if row.symbol == q.symbol {
+                    let text = fmt_input(q.price);
+                    if row.current_price != text {
+                        row.current_price = text;
+                        updated = true;
+                    }
+                }
+            }
+        }
+        if updated {
+            self.autosave();
+        }
+    }
 }
 
 impl eframe::App for PortfolioApp {
@@ -141,6 +215,19 @@ impl eframe::App for PortfolioApp {
         if model::portfolio_modified() != self.known_mtime {
             self.reload();
         }
+
+        // Refresh live prices: once at start up, then every 10 s until closing.
+        if Instant::now() >= self.next_quote_fetch {
+            self.next_quote_fetch = Instant::now() + QUOTE_INTERVAL;
+            if !self.quote_fetch_running {
+                self.spawn_quote_fetch(ui.ctx().clone());
+            }
+        }
+        while let Ok(quotes) = self.quotes_rx.try_recv() {
+            self.quote_fetch_running = false;
+            self.apply_prices(quotes);
+        }
+        // Keep frames ticking while idle so the refresh timer fires.
         ui.ctx().request_repaint_after(Duration::from_secs(1));
 
         self.header(ui);
@@ -214,22 +301,37 @@ impl PortfolioApp {
                     .inner_margin(Margin::symmetric(20, 6)),
             )
             .show(ui, |ui| {
-                ui.horizontal(|ui| match &self.status {
-                    Status::Saved => {
-                        ui.label(RichText::new("●").color(GREEN).size(11.0));
-                        ui.label(
-                            RichText::new(format!(
-                                "All changes saved automatically to {}",
-                                model::portfolio_path().display()
-                            ))
-                            .size(12.5)
-                            .color(MUTED),
+                ui.horizontal(|ui| {
+                    match &self.status {
+                        Status::Saved => {
+                            ui.label(RichText::new("●").color(GREEN).size(11.0));
+                            ui.label(
+                                RichText::new(format!(
+                                    "All changes saved automatically to {}",
+                                    model::portfolio_path().display()
+                                ))
+                                .size(12.5)
+                                .color(MUTED),
+                            );
+                        }
+                        Status::Error(e) => {
+                            ui.label(RichText::new("●").color(RED).size(11.0));
+                            ui.label(RichText::new(e).size(12.5).color(RED));
+                        }
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let text = match self.last_quote_update {
+                            Some(t) => format!("Prices updated {} · Yahoo, delayed ~15 min", t.format("%H:%M:%S")),
+                            None => "Prices not updated yet · Yahoo, delayed ~15 min".to_owned(),
+                        };
+                        ui.label(RichText::new(text).size(12.5).color(MUTED)).on_hover_text(
+                            "Current prices are refreshed from Yahoo Finance every 10 seconds. \
+                             Yahoo's quotes for Vietnamese markets are delayed by about 15–20 \
+                             minutes, so during trading hours this is the last traded price from \
+                             roughly a quarter of an hour ago.",
                         );
-                    }
-                    Status::Error(e) => {
-                        ui.label(RichText::new("●").color(RED).size(11.0));
-                        ui.label(RichText::new(e).size(12.5).color(RED));
-                    }
+                    });
                 });
             });
     }
