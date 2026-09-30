@@ -18,6 +18,8 @@ pub const GREEN: Color32 = Color32::from_rgb(0x05, 0x96, 0x69);
 pub const GREEN_SOFT: Color32 = Color32::from_rgb(0xEC, 0xFD, 0xF5);
 pub const RED: Color32 = Color32::from_rgb(0xDC, 0x26, 0x26);
 pub const RED_SOFT: Color32 = Color32::from_rgb(0xFE, 0xF2, 0xF2);
+/// Light orange, used for warnings short of a full red alert.
+pub const ORANGE: Color32 = Color32::from_rgb(0xF5, 0x9E, 0x0B);
 pub const INPUT_BG: Color32 = Color32::from_rgb(0xF8, 0xF9, 0xFC);
 
 pub fn semibold(size: f32) -> FontId {

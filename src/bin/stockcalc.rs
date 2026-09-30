@@ -304,7 +304,7 @@ impl CalcApp {
             cost_price: entry,
             current_price: entry,
             stop_loss: parse_or_zero(&self.stop_loss),
-            target: 0.0,
+            ..Default::default()
         };
         self.message = match model::append_holding(h) {
             Ok(()) => {

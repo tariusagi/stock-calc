@@ -16,6 +16,8 @@ pub struct Holding {
     pub current_price: f64,
     pub stop_loss: f64,
     pub target: f64,
+    /// Pinned rows sort to the top of the table.
+    pub pinned: bool,
 }
 
 impl Holding {

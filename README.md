@@ -16,10 +16,28 @@ It ships as two programs that work together:
 
 - One row per stock: symbol, quantity, cost price, current price, stop loss
   and target, all editable in place.
-- Calculated columns: total cost, unrealized P/L, stop % and total loss if
-  the stop is hit, target % and total gain if the target is reached.
+- Calculated columns: total cost, unrealized P/L with its percentage, stop %
+  and total loss if the stop is hit, target % and total gain if the target is
+  reached.
+- Symbols are colored by unrealized P/L: red for a loss, green for a gain.
+- The table sorts by symbol (default), total cost, P/L or P/L % — click the
+  column header to change the sort, click again to flip the direction. A
+  small pin before a symbol name pins the row to the top; pinned rows keep
+  the chosen sort among themselves, and pins are saved with the portfolio.
+- The P/L % column doubles as a horizontal bar chart: a bar starts at the
+  left edge of the cell, its length proportional to the P/L % relative to
+  the table's biggest, red for a loss and green for a gain.
+- The stop loss cell's background blinks orange when the current price comes
+  within 0.5% of it, and blinks red faster once it drops below it.
 - Summary cards for total cost, market value, unrealized P/L, loss at stops,
   gain at targets and the overall reward : risk ratio.
+- **Import** reads positions from a broker's portfolio export: click it to
+  pick the broker (currently SSI) and then its file. Only symbol, quantity,
+  average cost and market price are taken — every calculated field stays
+  computed by the app, and stop loss / target start empty. Adding merges
+  rows whose symbol already exists instead of duplicating them: quantities
+  add up and the cost price becomes the weighted average of the old and
+  imported lots (stop loss and target are kept).
 - **Stock Calculator** opens the calculator (or brings it to the front).
 
 ## Live prices
@@ -55,9 +73,10 @@ remove it.
 
 ## Conventions
 
-- All numbers are whole numbers with `'` as the thousand separator
-  (`1'234'567`), including while you type. Separators are inserted
-  automatically; pasted decimals are rounded.
+- All numbers are whole numbers with ',' as the thousand separator
+  (1,234,567), including while you type. Separators are inserted
+  automatically; pasted decimals are rounded. '.' is the decimal point.
+- Percentages show two digits after the decimal point (e.g. -13.88%).
 - Everything is saved automatically as you type and loaded on start.
 - Each program runs as a single instance: launching it again just brings the
   open window to the front.

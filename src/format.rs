@@ -1,14 +1,15 @@
-//! Number formatting with `'` as the thousand separator, plus a text input
-//! that inserts the separators live while the user types.
+//! Number formatting with ',' as the thousand separator and '.' as the
+//! decimal point, plus a text input that inserts the separators live while
+//! the user types.
 
 use eframe::egui::{
-    self, Align, Key, TextEdit, Ui,
+    self, Align, Color32, Key, TextEdit, Ui,
     text::{CCursor, CCursorRange},
 };
 
-pub const SEP: char = '\'';
+pub const SEP: char = ',';
 
-/// Groups a string of ASCII digits in threes: "1234567" -> "1'234'567".
+/// Groups a string of ASCII digits in threes: "1234567" -> "1,234,567".
 fn group_digits(digits: &str) -> String {
     let len = digits.len();
     let mut out = String::with_capacity(len + len / 3);
@@ -43,15 +44,18 @@ pub fn fmt_input(v: f64) -> String {
     if v.round() == 0.0 { String::new() } else { fmt_int(v) }
 }
 
+/// Formats a signed percentage with two decimals ('.' as the decimal point),
+/// e.g. -13.883 -> "-13.88%", 34.45 -> "+34.45%".
 pub fn fmt_signed_pct(v: f64) -> String {
     if !v.is_finite() {
         return "–".to_owned();
     }
-    let sign = if v.round() > 0.0 { "+" } else { "" };
-    format!("{sign}{}%", fmt_int(v))
+    let r = (v * 100.0).round() / 100.0;
+    let sign = if r > 0.0 { "+" } else if r < 0.0 { "-" } else { "" };
+    format!("{sign}{:.2}%", r.abs())
 }
 
-/// Parses user text such as "1'234" into a whole number; empty or invalid
+/// Parses user text such as "1,234" into a whole number; empty or invalid
 /// text yields `None`.
 pub fn parse_num(s: &str) -> Option<f64> {
     let cleaned: String = s.chars().filter(|&c| c != SEP && !c.is_whitespace()).collect();
@@ -125,12 +129,27 @@ fn reformat(raw: &str, cursor: usize) -> (String, usize) {
 /// A right-aligned whole-number text field that formats with `'`
 /// separators as the user types. Returns `true` when the text changed.
 pub fn num_input(ui: &mut Ui, text: &mut String, width: f32, hint: &str) -> bool {
+    num_input_bg(ui, text, width, hint, None)
+}
+
+/// Same, with an optional background color (e.g. a stop loss whose cell
+/// blinks because the price is closing in on it).
+pub fn num_input_bg(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    hint: &str,
+    bg: Option<Color32>,
+) -> bool {
     let before = text.clone();
-    let mut output = TextEdit::singleline(text)
+    let mut edit = TextEdit::singleline(text)
         .desired_width(width)
         .horizontal_align(Align::RIGHT)
-        .hint_text(hint)
-        .show(ui);
+        .hint_text(hint);
+    if let Some(bg) = bg {
+        edit = edit.background_color(bg);
+    }
+    let mut output = edit.show(ui);
 
     if !output.response.response.changed() {
         return false;
@@ -171,12 +190,24 @@ pub fn num_input(ui: &mut Ui, text: &mut String, width: f32, hint: &str) -> bool
 
 /// Plain uppercase text input for ticker symbols.
 pub fn symbol_input(ui: &mut Ui, text: &mut String, width: f32) -> egui::Response {
-    let resp = ui.add(
-        egui::TextEdit::singleline(text)
-            .desired_width(width)
-            .char_limit(12)
-            .hint_text("SYMBOL"),
-    );
+    symbol_input_colored(ui, text, width, None)
+}
+
+/// Same, with an optional text color (e.g. to color a symbol by its P/L).
+pub fn symbol_input_colored(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    color: Option<Color32>,
+) -> egui::Response {
+    let mut edit = egui::TextEdit::singleline(text)
+        .desired_width(width)
+        .char_limit(12)
+        .hint_text("SYMBOL");
+    if let Some(color) = color {
+        edit = edit.text_color(color);
+    }
+    let resp = ui.add(edit);
     if resp.changed() {
         *text = text
             .chars()
@@ -193,20 +224,24 @@ mod tests {
 
     #[test]
     fn formats_numbers() {
-        assert_eq!(fmt_int(1234567.891), "1'234'568");
-        assert_eq!(fmt_int(-1234.0), "-1'234");
+        assert_eq!(fmt_int(1234567.891), "1,234,568");
+        assert_eq!(fmt_int(-1234.0), "-1,234");
         assert_eq!(fmt_int(2.5), "3");
         assert_eq!(fmt_int(-0.4), "0");
-        assert_eq!(fmt_input(1500.25), "1'500");
+        assert_eq!(fmt_input(1500.25), "1,500");
         assert_eq!(fmt_input(0.0), "");
-        assert_eq!(fmt_signed_pct(6.28), "+6%");
-        assert_eq!(fmt_signed_pct(-6.5), "-7%");
-        assert_eq!(fmt_signed_pct(0.2), "0%");
+        assert_eq!(fmt_signed_pct(6.28), "+6.28%");
+        assert_eq!(fmt_signed_pct(-6.5), "-6.50%");
+        assert_eq!(fmt_signed_pct(0.2), "+0.20%");
+        assert_eq!(fmt_signed_pct(-13.883), "-13.88%");
+        assert_eq!(fmt_signed_pct(212.5), "+212.50%");
+        assert_eq!(fmt_signed_pct(0.0), "0.00%");
+        assert_eq!(fmt_signed_pct(-0.004), "0.00%");
     }
 
     #[test]
     fn parses_numbers() {
-        assert_eq!(parse_num("1'234"), Some(1234.0));
+        assert_eq!(parse_num("1,234"), Some(1234.0));
         assert_eq!(parse_num("245.7"), Some(246.0));
         assert_eq!(parse_num(""), None);
         assert_eq!(parse_num("abc"), None);
@@ -215,15 +250,15 @@ mod tests {
     #[test]
     fn reformats_while_typing() {
         // typed "1234" with cursor at end
-        assert_eq!(reformat("1234", 4), ("1'234".into(), 5));
-        // inserted a digit in the middle: "1'2534" cursor after '5' (idx 4)
-        assert_eq!(reformat("1'2534", 4), ("12'534".into(), 4));
+        assert_eq!(reformat("1234", 4), ("1,234".into(), 5));
+        // inserted a digit in the middle: "1,2534" cursor after '5' (idx 4)
+        assert_eq!(reformat("1,2534", 4), ("12,534".into(), 4));
         // letters are dropped
         assert_eq!(reformat("1a23", 4), ("123".into(), 3));
         // leading zeros
         assert_eq!(reformat("0005", 4), ("5".into(), 1));
         // decimals are rounded away
-        assert_eq!(reformat("12345.6789", 10), ("12'346".into(), 6));
+        assert_eq!(reformat("12345.6789", 10), ("12,346".into(), 6));
         assert_eq!(reformat("245.", 4), ("245".into(), 3));
         assert_eq!(reformat(".4", 2), ("".into(), 0));
     }
