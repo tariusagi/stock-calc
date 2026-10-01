@@ -27,6 +27,11 @@ It ships as two programs that work together:
 - The P/L % column doubles as a horizontal bar chart: a bar starts at the
   left edge of the cell, its length proportional to the P/L % relative to
   the table's biggest, red for a loss and green for a gain.
+- The Total Cost column does the same in light blue: bar length is this
+  row's total cost relative to the largest position in the table.
+- The P/L column does the same for the money amount: bar length is this
+  row's unrealized P/L relative to the biggest move in the table, green
+  for a gain and red for a loss.
 - The stop loss cell's background blinks orange when the current price comes
   within 0.5% of it, and blinks red faster once it drops below it.
 - Summary cards for total cost, market value, unrealized P/L, loss at stops,

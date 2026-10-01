@@ -592,6 +592,10 @@ impl PortfolioApp {
             let order = sort_order(&self.rows, holdings, self.sort_key, self.sort_desc);
             // The longest P/L % bar fills the whole column width.
             let max_pct = holdings.iter().filter_map(pl_pct).map(f64::abs).fold(0.0, f64::max);
+            // The largest positive total cost fills the Total Cost column.
+            let max_cost = holdings.iter().map(Holding::total_cost).fold(0.0, f64::max);
+            // The largest absolute P/L fills the P/L column.
+            let max_pl = holdings.iter().map(|h| h.unrealized().abs()).fold(0.0, f64::max);
 
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 TableBuilder::new(ui)
@@ -730,10 +734,39 @@ impl PortfolioApp {
                                     num_input(ui, &mut row.current_price, IN_W - 8.0, "0");
                                 });
                                 r.col(|ui| {
-                                    ui.label(RichText::new(fmt_int(h.total_cost())).color(TEXT));
+                                    // Horizontal bar from the left edge, length
+                                    // proportional to this row's total cost
+                                    // relative to the table's largest.
+                                    let cost = h.total_cost();
+                                    if cost > 0.0 && max_cost > 0.0 {
+                                        let frac = ((cost / max_cost) as f32).clamp(0.0, 1.0);
+                                        let mut bar = ui.available_rect_before_wrap();
+                                        bar.max.x = bar.min.x + bar.width() * frac;
+                                        ui.painter().rect_filled(
+                                            bar,
+                                            2,
+                                            Color32::from_rgba_unmultiplied(0x38, 0xBD, 0xF8, 90),
+                                        );
+                                    }
+                                    ui.label(RichText::new(fmt_int(cost)).color(TEXT));
                                 });
                                 r.col(|ui| {
+                                    // Horizontal bar from the left edge, length
+                                    // proportional to this row's P/L relative
+                                    // to the table's biggest move. Green for a
+                                    // gain, red for a loss.
                                     let pl = h.unrealized();
+                                    if pl != 0.0 && max_pl > 0.0 {
+                                        let frac = ((pl.abs() / max_pl) as f32).clamp(0.0, 1.0);
+                                        let mut bar = ui.available_rect_before_wrap();
+                                        bar.max.x = bar.min.x + bar.width() * frac;
+                                        let c = if pl > 0.0 { GREEN } else { RED };
+                                        ui.painter().rect_filled(
+                                            bar,
+                                            2,
+                                            Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 70),
+                                        );
+                                    }
                                     let resp = ui.label(RichText::new(fmt_int(pl)).color(signed_color(pl)));
                                     if h.total_cost() > 0.0 && h.current_price > 0.0 {
                                         resp.on_hover_text(format!(
